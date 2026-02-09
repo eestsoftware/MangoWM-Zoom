@@ -1,0 +1,354 @@
+diff --git a/src/config/parse_config.h b/src/config/parse_config.h
+index a795961..c872036 100644
+--- a/src/config/parse_config.h
++++ b/src/config/parse_config.h
+@@ -184,6 +184,8 @@ typedef struct {
+ 	int32_t tag_animation_direction;
+ 	float zoom_initial_ratio;
+ 	float zoom_end_ratio;
++	float zoom_max;
++	float zoom_speed;
+ 	float fadein_begin_opacity;
+ 	float fadeout_begin_opacity;
+ 	uint32_t animation_duration_move;
+@@ -1173,6 +1175,15 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
+ 	} else if (strcmp(func_name, "scroller_stack") == 0) {
+ 		func = scroller_stack;
+ 		(*arg).i = parse_direction(arg_value);
++	} else if (strcmp(func_name, "screen_zoom_in") == 0) {
++		func = screen_zoom_in;
++	} else if (strcmp(func_name, "screen_zoom_out") == 0) {
++		func = screen_zoom_out;
++	} else if (strcmp(func_name, "screen_zoom_reset") == 0) {
++		func = screen_zoom_reset;
++	} else if (strcmp(func_name, "screen_zoom_set") == 0) {
++		func = screen_zoom_set;
++		(*arg).f = atof(arg_value);
+ 	} else {
+ 		return NULL;
+ 	}
+@@ -1236,6 +1247,10 @@ bool parse_option(Config *config, char *key, char *value) {
+ 		config->zoom_initial_ratio = atof(value);
+ 	} else if (strcmp(key, "zoom_end_ratio") == 0) {
+ 		config->zoom_end_ratio = atof(value);
++	} else if (strcmp(key, "zoom_max") == 0) {
++		config->zoom_max = atof(value);
++	} else if (strcmp(key, "zoom_speed") == 0) {
++		config->zoom_speed = atof(value);
+ 	} else if (strcmp(key, "fadein_begin_opacity") == 0) {
+ 		config->fadein_begin_opacity = atof(value);
+ 	} else if (strcmp(key, "fadeout_begin_opacity") == 0) {
+@@ -3016,6 +3031,8 @@ void override_config(void) {
+ 	animation_fade_out = CLAMP_INT(config.animation_fade_out, 0, 1);
+ 	zoom_initial_ratio = CLAMP_FLOAT(config.zoom_initial_ratio, 0.1f, 1.0f);
+ 	zoom_end_ratio = CLAMP_FLOAT(config.zoom_end_ratio, 0.1f, 1.0f);
++	zoom_max = CLAMP_FLOAT(config.zoom_max, 1.0f, 20.0f);
++	zoom_speed = CLAMP_FLOAT(config.zoom_speed, 0.01f, 5.0f);
+ 	fadein_begin_opacity = CLAMP_FLOAT(config.fadein_begin_opacity, 0.0f, 1.0f);
+ 	fadeout_begin_opacity =
+ 		CLAMP_FLOAT(config.fadeout_begin_opacity, 0.0f, 1.0f);
+@@ -3195,6 +3212,8 @@ void set_value_default() {
+ 	config.tag_animation_direction = tag_animation_direction; // 标签动画方向
+ 	config.zoom_initial_ratio = zoom_initial_ratio; // 动画起始窗口比例
+ 	config.zoom_end_ratio = zoom_end_ratio;			// 动画结束窗口比例
++	config.zoom_max = zoom_max;
++	config.zoom_speed = zoom_speed;
+ 	config.fadein_begin_opacity =
+ 		fadein_begin_opacity; // Begin opac window ratio for animations
+ 	config.fadeout_begin_opacity = fadeout_begin_opacity;
+diff --git a/src/config/preset.h b/src/config/preset.h
+index ae4424f..0c9178f 100644
+--- a/src/config/preset.h
++++ b/src/config/preset.h
+@@ -236,3 +236,11 @@ double shadows_blur = 15;
+ int32_t shadows_position_x = 0;
+ int32_t shadows_position_y = 0;
+ float shadowscolor[] = COLOR(0x000000ff);
++
++/* screen zoom */
++float zoom_level = 1.0f;
++float zoom_target = 1.0f;
++float zoom_max = 4.0f;
++float zoom_speed = 0.2f;
++int32_t zoom_animating = 0;
++uint32_t zoom_anim_duration = 200;
+diff --git a/src/dispatch/bind_declare.h b/src/dispatch/bind_declare.h
+index 22ef612..624fd24 100644
+--- a/src/dispatch/bind_declare.h
++++ b/src/dispatch/bind_declare.h
+@@ -69,4 +69,8 @@ int32_t setoption(const Arg *arg);
+ int32_t disable_monitor(const Arg *arg);
+ int32_t enable_monitor(const Arg *arg);
+ int32_t toggle_monitor(const Arg *arg);
+-int32_t scroller_stack(const Arg *arg);
+\ No newline at end of file
++int32_t scroller_stack(const Arg *arg);
++int32_t screen_zoom_in(const Arg *arg);
++int32_t screen_zoom_out(const Arg *arg);
++int32_t screen_zoom_reset(const Arg *arg);
++int32_t screen_zoom_set(const Arg *arg);
+\ No newline at end of file
+diff --git a/src/dispatch/bind_define.h b/src/dispatch/bind_define.h
+index 1d29bc9..e9f5792 100644
+--- a/src/dispatch/bind_define.h
++++ b/src/dispatch/bind_define.h
+@@ -1725,4 +1725,46 @@ int32_t scroller_stack(const Arg *arg) {
+ 
+ 	arrange(selmon, false, false);
+ 	return 0;
++}
++
++/* Screen zoom functions */
++
++static void screen_zoom_start_animation(void) {
++	zoom_animating = 1;
++}
++
++int32_t screen_zoom_in(const Arg *arg) {
++	zoom_target += zoom_speed;
++	if (zoom_target > zoom_max)
++		zoom_target = zoom_max;
++	screen_zoom_start_animation();
++	request_fresh_all_monitors();
++	return 0;
++}
++
++int32_t screen_zoom_out(const Arg *arg) {
++	zoom_target -= zoom_speed;
++	if (zoom_target < 1.0f)
++		zoom_target = 1.0f;
++	screen_zoom_start_animation();
++	request_fresh_all_monitors();
++	return 0;
++}
++
++int32_t screen_zoom_reset(const Arg *arg) {
++	zoom_target = 1.0f;
++	screen_zoom_start_animation();
++	request_fresh_all_monitors();
++	return 0;
++}
++
++int32_t screen_zoom_set(const Arg *arg) {
++	zoom_target = arg->f;
++	if (zoom_target < 1.0f)
++		zoom_target = 1.0f;
++	if (zoom_target > zoom_max)
++		zoom_target = zoom_max;
++	screen_zoom_start_animation();
++	request_fresh_all_monitors();
++	return 0;
+ }
+\ No newline at end of file
+diff --git a/src/mango.c b/src/mango.c
+index 56f853b..1415e72 100644
+--- a/src/mango.c
++++ b/src/mango.c
+@@ -29,7 +29,11 @@
+ #include <wlr/backend/wayland.h>
+ #include <wlr/interfaces/wlr_keyboard.h>
+ #include <wlr/render/allocator.h>
++#include <wlr/render/drm_format_set.h>
++#include <wlr/render/pass.h>
++#include <wlr/render/swapchain.h>
+ #include <wlr/render/wlr_renderer.h>
++#include <wlr/render/wlr_texture.h>
+ #include <wlr/types/wlr_alpha_modifier_v1.h>
+ #include <wlr/types/wlr_compositor.h>
+ #include <wlr/types/wlr_cursor.h>
+@@ -772,6 +776,8 @@ static void init_client_properties(Client *c);
+ static float *get_border_color(Client *c);
+ static void clear_fullscreen_and_maximized_state(Monitor *m);
+ static void request_fresh_all_monitors(void);
++static void screen_zoom_update(void);
++static void render_zoomed(Monitor *m);
+ static Client *find_client_by_direction(Client *tc, const Arg *arg,
+ 										bool findfloating, bool ignore_align);
+ static void exit_scroller_stack(Client *c);
+@@ -863,6 +869,8 @@ static double swipe_dy = 0;
+ 
+ bool render_border = true;
+ 
++static struct wlr_swapchain *zoom_swapchain = NULL;
++
+ uint32_t chvt_backup_tag = 0;
+ bool allow_frame_scheduling = true;
+ char chvt_backup_selmon[32] = {0};
+@@ -4338,6 +4346,153 @@ void client_set_opacity(Client *c, double opacity) {
+ 								   scene_buffer_apply_opacity, &opacity);
+ }
+ 
++static void screen_zoom_update(void) {
++	if (!zoom_animating)
++		return;
++
++	float diff = zoom_target - zoom_level;
++	if (fabsf(diff) < 0.001f) {
++		zoom_level = zoom_target;
++		zoom_animating = 0;
++		if (zoom_level <= 1.0f) {
++			zoom_level = 1.0f;
++			/* Free zoom swapchain when not zoomed */
++			if (zoom_swapchain) {
++				wlr_swapchain_destroy(zoom_swapchain);
++				zoom_swapchain = NULL;
++			}
++		}
++		return;
++	}
++
++	/* Smooth ease-out interpolation */
++	zoom_level += diff * 0.15f;
++}
++
++static void render_zoomed(Monitor *m) {
++	struct wlr_output *output = m->wlr_output;
++	int32_t width = output->width;
++	int32_t height = output->height;
++
++	/* Build normal scene state */
++	struct wlr_output_state state = {0};
++	wlr_output_state_init(&state);
++	if (!wlr_scene_output_build_state(m->scene_output, &state, NULL)) {
++		wlr_log(WLR_ERROR, "[%s:%d] Failed to build zoom scene state",
++				__FILE__, __LINE__);
++		wlr_output_state_finish(&state);
++		return;
++	}
++
++	/* Ensure zoom swapchain exists and matches output size */
++	if (!zoom_swapchain || zoom_swapchain->width != width ||
++		zoom_swapchain->height != height) {
++		if (zoom_swapchain)
++			wlr_swapchain_destroy(zoom_swapchain);
++
++		const struct wlr_drm_format_set *formats =
++			wlr_renderer_get_texture_formats(drw, alloc->buffer_caps);
++		const struct wlr_drm_format *fmt =
++			wlr_drm_format_set_get(formats, output->render_format);
++		if (!fmt) {
++			wlr_log(WLR_ERROR, "[%s:%d] Failed to create zoom swapchain",
++					__FILE__, __LINE__);
++			wlr_output_commit_state(output, &state);
++			wlr_output_state_finish(&state);
++			return;
++		}
++		zoom_swapchain = wlr_swapchain_create(alloc, width, height, fmt);
++		if (!zoom_swapchain) {
++			wlr_log(WLR_ERROR, "[%s:%d] Failed to create zoom swapchain",
++					__FILE__, __LINE__);
++			wlr_output_commit_state(output, &state);
++			wlr_output_state_finish(&state);
++			return;
++		}
++	}
++
++	/* Acquire zoom buffer */
++	struct wlr_buffer *zoom_buf = wlr_swapchain_acquire(zoom_swapchain);
++	if (!zoom_buf) {
++		wlr_output_commit_state(output, &state);
++		wlr_output_state_finish(&state);
++		return;
++	}
++
++	/* Create texture from the scene buffer */
++	struct wlr_texture *scene_tex =
++		wlr_texture_from_buffer(drw, state.buffer);
++	if (!scene_tex) {
++		wlr_log(WLR_ERROR, "[%s:%d] Failed to create zoom texture",
++				__FILE__, __LINE__);
++		wlr_buffer_unlock(zoom_buf);
++		wlr_output_commit_state(output, &state);
++		wlr_output_state_finish(&state);
++		return;
++	}
++
++	/* Begin render pass on zoom buffer */
++	struct wlr_render_pass *pass =
++		wlr_renderer_begin_buffer_pass(drw, zoom_buf, NULL);
++	if (!pass) {
++		wlr_log(WLR_ERROR, "[%s:%d] Failed to begin zoom render pass",
++				__FILE__, __LINE__);
++		wlr_texture_destroy(scene_tex);
++		wlr_buffer_unlock(zoom_buf);
++		wlr_output_commit_state(output, &state);
++		wlr_output_state_finish(&state);
++		return;
++	}
++
++	/* Calculate viewport centered on cursor */
++	double cx = (cursor->x - m->m.x) * output->scale;
++	double cy = (cursor->y - m->m.y) * output->scale;
++
++	double vw = (double)width / zoom_level;
++	double vh = (double)height / zoom_level;
++
++	double vx = cx - vw / 2.0;
++	double vy = cy - vh / 2.0;
++
++	/* Clamp viewport to buffer bounds */
++	if (vx < 0)
++		vx = 0;
++	if (vy < 0)
++		vy = 0;
++	if (vx + vw > width)
++		vx = width - vw;
++	if (vy + vh > height)
++		vy = height - vh;
++
++	/* Clear and draw zoomed scene */
++	wlr_render_pass_add_rect(pass,
++		&(struct wlr_render_rect_options){
++			.box = {0, 0, width, height},
++			.color = {0, 0, 0, 1},
++			.blend_mode = WLR_RENDER_BLEND_MODE_NONE,
++		});
++
++	wlr_render_pass_add_texture(pass,
++		&(struct wlr_render_texture_options){
++			.texture = scene_tex,
++			.src_box = {vx, vy, vw, vh},
++			.dst_box = {0, 0, width, height},
++			.filter_mode = WLR_SCALE_FILTER_BILINEAR,
++			.blend_mode = WLR_RENDER_BLEND_MODE_NONE,
++		});
++
++	wlr_render_pass_submit(pass);
++	wlr_texture_destroy(scene_tex);
++
++	/* Replace buffer in output state with zoomed buffer */
++	wlr_output_state_set_buffer(&state, zoom_buf);
++	wlr_buffer_unlock(zoom_buf);
++
++	/* Commit the zoomed state */
++	wlr_output_commit_state(output, &state);
++	wlr_output_state_finish(&state);
++}
++
+ void rendermon(struct wl_listener *listener, void *data) {
+ 	Monitor *m = wl_container_of(listener, m, frame);
+ 	Client *c = NULL, *tmp = NULL;
+@@ -4384,8 +4539,13 @@ void rendermon(struct wl_listener *listener, void *data) {
+ 		}
+ 	}
+ 
++	// Update zoom animation
++	screen_zoom_update();
++
+ 	// 只有在需要帧时才构建和提交状态
+-	if (allow_tearing && frame_allow_tearing) {
++	if (zoom_level > 1.0f) {
++		render_zoomed(m);
++	} else if (allow_tearing && frame_allow_tearing) {
+ 		apply_tear_state(m);
+ 	} else {
+ 		wlr_scene_output_commit(m->scene_output, NULL);
+@@ -4402,7 +4562,7 @@ skip:
+ 	}
+ 
+ 	// 如果需要更多帧，确保安排下一帧
+-	if (need_more_frames && allow_frame_scheduling) {
++	if (need_more_frames || zoom_animating) {
+ 		request_fresh_all_monitors();
+ 	}
+ }
