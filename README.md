@@ -40,8 +40,8 @@ You need everything mangowm needs, plus you're specifically using some wlroots r
 ```
 meson ninja gcc pkgconf
 wayland wayland-protocols
-wlroots (0.19.x) — this is the big one, the render_pass and swapchain APIs come from here
-scenefx (>=0.4.1) — mangowm's effects library
+wlroots (0.20.x) — this is the big one, the render_pass and swapchain APIs come from here
+scenefx (>=5.0) — mangowm's effects library
 libinput libdrm libxkbcommon pixman
 libdisplay-info libliftoff hwdata seatd pcre2
 xorg-xwayland libxcb xcb-util-wm  (optional, for xwayland support)
