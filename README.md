@@ -34,20 +34,20 @@ The patch touches these files:
 
 ## Dependencies
 
-You need everything mangowc needs, plus you're specifically using some wlroots render APIs that are already linked but worth calling out:
+You need everything mangowm needs, plus you're specifically using some wlroots render APIs that are already linked but worth calling out:
 
 **Build deps** (assuming Arch, adjust package names for your distro):
 ```
 meson ninja gcc pkgconf
 wayland wayland-protocols
 wlroots (0.19.x) — this is the big one, the render_pass and swapchain APIs come from here
-scenefx (>=0.4.1) — mangowc's effects library
+scenefx (>=0.4.1) — mangowm's effects library
 libinput libdrm libxkbcommon pixman
 libdisplay-info libliftoff hwdata seatd pcre2
 xorg-xwayland libxcb xcb-util-wm  (optional, for xwayland support)
 ```
 
-On Arch most of these pull in automatically if you just grab `wlroots` and `scenefx`. The AUR package `mangowc-git` has the full dep list if you want to cross-reference.
+On Arch most of these pull in automatically if you just grab `wlroots` and `scenefx`. The AUR package `mangowm-git` has the full dep list if you want to cross-reference.
 
 The zoom rendering specifically uses these wlroots headers (already part of wlroots, nothing extra to install):
 - `wlr/render/pass.h` — render pass API
@@ -57,11 +57,11 @@ The zoom rendering specifically uses these wlroots headers (already part of wlro
 
 ## How to apply
 
-Clone mangowc and apply the patch:
+Clone mangowm and apply the patch:
 
 ```bash
-git clone https://github.com/DreamMaoMao/mangowc.git
-cd mangowc
+git clone https://github.com/mangowm/mango.git
+cd mango
 git apply /path/to/screen-zoom.patch
 ```
 
