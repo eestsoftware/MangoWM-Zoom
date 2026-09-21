@@ -29,7 +29,7 @@ The patch touches these files:
 | `src/config/parse_config.c` | Register config functions and options. |
 | `include/mango/dispatch/bind.h` | Function declarations for the 4 zoom actions |
 | `src/dispatch/bind.c` | Function definitions for zoom in/out/reset/set |
-| `include/mango/manage/monitor.h` | Adds monitor specific zoom variables: 'zoom_level', 'zoom_target', 'zoom_animating', 'zoom_x', 'zoom_y' |
+| `include/mango/manage/monitor.h` | Adds monitor specific zoom variables: `zoom_level`, `zoom_target`, `zoom_animating`, `zoom_x`, `zoom_y` |
 | `src/manage/monitor.c` | Main zoom render loop is in here. |
 
 ## Dependencies
@@ -118,7 +118,7 @@ See `config-example.conf` in this repo for a copy-paste ready snippet.
 
 ## How it works (brief)
 
-The zoom runs in the compositor's render loop (`handle_output_frame` in 'monitor.c'). Each frame:
+The zoom runs in the compositor's render loop (`handle_output_frame` in `monitor.c`). Each frame:
 
 1. `screen_zoom_update(m)` interpolates `zoom_level` toward `zoom_target` on the selected monitor with ease-out (`+= diff * 0.15`)
 2. If `zoom_level > 1.0`, `render_zoomed(m)` takes over instead of the normal scene commit
