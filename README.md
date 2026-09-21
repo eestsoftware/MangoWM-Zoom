@@ -1,8 +1,10 @@
-# Screen Zoom for MangoWC
+# Screen Zoom for MangoWM
 
-Adds a proper screen zoom to [mangowc](https://github.com/DreamMaoMao/mangowc) — hold a modifier and scroll to zoom in/out, centered on where your cursor is. Smooth animated, not janky. Resets cleanly back to 1x.
+Adds a proper screen zoom to [MangoWM](https://github.com/mangowm/mango) — hold a modifier and scroll to zoom in/out, centered on where your cursor is. Smooth animated, not janky. Resets cleanly back to 1x.
 
-This patches mangowc directly. It renders the scene to an offscreen buffer, crops a viewport around the cursor, and scales it back up to fill the output. Uses wlroots render passes so there's no extra compositor overhead.
+This patches MangoWM directly. It renders the scene to an offscreen buffer, crops a viewport around the cursor, and scales it back up to fill the output. Uses wlroots render passes so there's no extra compositor overhead.
+
+This is a fork of the old version built for the latest release of Mango.
 
 ## What it does
 
@@ -12,20 +14,23 @@ This patches mangowc directly. It renders the scene to an offscreen buffer, crop
 - Viewport follows your cursor and clamps to screen edges
 - Smooth ease-out animation between zoom levels
 - Swapchain is only allocated while zoomed, freed when you reset
+- Supports zooming with multiple monitors.
 
 ## Patch info
 
-Built against mangowc commit `e357c8f` (upstream `main` as of 2025-02-08).
+Built against MangoWM commit `999a546fd22cd7faef665f340d793f8d068d7255` (upstream `main` as of 2026-09-21).
 
 The patch touches these files:
 
 | File | What changed |
 |------|-------------|
-| `src/mango.c` | `render_zoomed()` and `screen_zoom_update()` functions, hooked into `rendermon()` |
-| `src/config/preset.h` | New globals: `zoom_level`, `zoom_target`, `zoom_max`, `zoom_speed`, `zoom_animating`, `zoom_anim_duration` |
-| `src/config/parse_config.h` | Config parsing for `zoom_max` and `zoom_speed`, plus function name registration |
-| `src/dispatch/bind_declare.h` | Function declarations for the 4 zoom actions |
-| `src/dispatch/bind_define.h` | Function definitions for zoom in/out/reset/set |
+| `src/main.c` | Adds required wlroots headers (mentioned below) |
+| `include/mango/config/parse_config.h` | New config options for: `zoom_max`, `zoom_speed` |
+| `src/config/parse_config.c` | Register config functions and options. |
+| `include/mango/dispatch/bind.h` | Function declarations for the 4 zoom actions |
+| `src/dispatch/bind.c` | Function definitions for zoom in/out/reset/set |
+| `include/mango/manage/monitor.h` | Adds monitor specific zoom variables: 'zoom_level', 'zoom_target', 'zoom_animating', 'zoom_x', 'zoom_y' |
+| `src/manage/monitor.c` | Main zoom render loop is in here. |
 
 ## Dependencies
 
@@ -57,7 +62,6 @@ Clone mangowc and apply the patch:
 ```bash
 git clone https://github.com/DreamMaoMao/mangowc.git
 cd mangowc
-git checkout e357c8f   # you can pin this to whatever build you want.
 git apply /path/to/screen-zoom.patch
 ```
 
@@ -70,15 +74,13 @@ and resolve any conflicts manually. The changes are pretty self-contained so it 
 ## Build & install
 
 ```bash
-meson setup build
-ninja -C build
-sudo install -m 755 build/mango /usr/bin/mango
+meson build -Dprefix=/usr
+sudo ninja -C build install
 ```
 
 If you already have a build dir from before, just rebuild:
 ```bash
-ninja -C build
-sudo install -m 755 build/mango /usr/bin/mango
+sudo ninja -C build install
 ```
 
 ## Configuration
@@ -87,8 +89,8 @@ Add these to your `config.conf` (usually `~/.config/mango/config.conf`):
 
 **Zoom settings:**
 ```ini
-zoom_max=4.0
-zoom_speed=0.2
+zoom_max=6.0
+zoom_speed=0.3
 ```
 
 - `zoom_max` — how far you can zoom in (clamped between 1.0 and 20.0). 4x is plenty for most uses.
@@ -116,10 +118,10 @@ See `config-example.conf` in this repo for a copy-paste ready snippet.
 
 ## How it works (brief)
 
-The zoom runs in the compositor's render loop (`rendermon`). Each frame:
+The zoom runs in the compositor's render loop (`handle_output_frame` in 'monitor.c'). Each frame:
 
-1. `screen_zoom_update()` interpolates `zoom_level` toward `zoom_target` with ease-out (`+= diff * 0.15`)
-2. If `zoom_level > 1.0`, `render_zoomed()` takes over instead of the normal scene commit
+1. `screen_zoom_update(m)` interpolates `zoom_level` toward `zoom_target` on the selected monitor with ease-out (`+= diff * 0.15`)
+2. If `zoom_level > 1.0`, `render_zoomed(m)` takes over instead of the normal scene commit
 3. The scene gets rendered to a buffer normally via `wlr_scene_output_build_state`
 4. A texture is created from that buffer
 5. A viewport is calculated centered on the cursor position (clamped to screen edges)
