@@ -29,7 +29,7 @@ The patch touches these files:
 | `src/config/parse_config.c` | Register config functions and options. |
 | `include/mango/dispatch/bind.h` | Function declarations for the 4 zoom actions |
 | `src/dispatch/bind.c` | Function definitions for zoom in/out/reset/set |
-| `include/mango/manage/monitor.h` | Adds monitor specific zoom variables: `zoom_level`, `zoom_target`, `zoom_animating`, `zoom_x`, `zoom_y` |
+| `include/mango/manage/server.h` | Define global zoom variables: `zoom_level`, `zoom_target`, `zoom_animating`, `zoom_x`, `zoom_y` |
 | `src/manage/monitor.c` | Main zoom render loop is in here. |
 
 ## Dependencies

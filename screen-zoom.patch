@@ -1,20 +1,39 @@
-From 9c9a33291db4006ba8415d7c89960a4a655f6683 Mon Sep 17 00:00:00 2001
+From 8259538d0013d21c0b8ca1f9590562b7696f33da Mon Sep 17 00:00:00 2001
 From: Silenceman <eestsoftware@gmail.com>
-Date: Mon, 21 Sep 2026 23:37:10 +0300
-Subject: [PATCH] Better zoom patch
+Date: Tue, 22 Sep 2026 22:58:54 +0300
+Subject: [PATCH] Better multi monitor zoom implementation
 
 ---
+ include/mango/common/server.h       |   7 ++
  include/mango/config/parse_config.h |   3 +
  include/mango/dispatch/bind.h       |   4 +
  include/mango/manage/client.h       |   2 +
- include/mango/manage/monitor.h      |   8 ++
- src/config/parse_config.c           |  17 +++
+ src/common/server.c                 |   6 ++
+ src/config/parse_config.c           |  17 ++++
  src/dispatch/bind.c                 |  42 ++++++++
  src/main.c                          |   4 +
- src/manage/client.c                 | 159 ++++++++++++++++++++++++++++
- src/manage/monitor.c                |  12 ++-
- 9 files changed, 250 insertions(+), 1 deletion(-)
+ src/manage/client.c                 | 149 ++++++++++++++++++++++++++++
+ src/manage/monitor.c                |   6 +-
+ 10 files changed, 239 insertions(+), 1 deletion(-)
 
+diff --git a/include/mango/common/server.h b/include/mango/common/server.h
+index 3949a4f0..d7bbb5fe 100644
+--- a/include/mango/common/server.h
++++ b/include/mango/common/server.h
+@@ -234,6 +234,13 @@ struct MangoServer {
+ 	struct wl_listener new_foreign_toplevel_capture_listener;
+ 	struct wlr_ext_foreign_toplevel_list_v1 *foreign_toplevel_list;
+ 
++	/*        Zoooooom!       */
++
++	struct wlr_swapchain *zoom_swapchain;
++	float zoom_level;
++	float zoom_target;
++	int32_t zoom_animating;
++
+ #ifdef XWAYLAND
+ 	struct wlr_xwayland *xwayland;
+ 	struct wl_event_source *sync_keymap;
 diff --git a/include/mango/config/parse_config.h b/include/mango/config/parse_config.h
 index e28a6d09..b2bf0b5a 100644
 --- a/include/mango/config/parse_config.h
@@ -45,37 +64,35 @@ index e76405be..f4bffa26 100644
  int32_t dwindle_toggle_split_direction(const Arg *arg);
  int32_t dwindle_split_horizontal(const Arg *arg);
 diff --git a/include/mango/manage/client.h b/include/mango/manage/client.h
-index e289e945..6c640449 100644
+index e289e945..aea0361f 100644
 --- a/include/mango/manage/client.h
 +++ b/include/mango/manage/client.h
 @@ -387,6 +387,8 @@ void set_minimized(Client *c);
  void unminimize(Client *c);
  void exit_scroller_stack(Client *c);
  void clear_fullscreen_and_maximized_state(Monitor *m);
-+void screen_zoom_update(Monitor *m);
++void screen_zoom_update();
 +void render_zoomed(Monitor *m);
  
  /* Clears the fullscreen flag and restores the border zeroed at fullscreen. */
  void clear_fullscreen_flag(Client *c);
-diff --git a/include/mango/manage/monitor.h b/include/mango/manage/monitor.h
-index 8cff5261..e05e1253 100644
---- a/include/mango/manage/monitor.h
-+++ b/include/mango/manage/monitor.h
-@@ -91,6 +91,14 @@ struct Monitor {
- 	struct wlr_color_transform
- 		*icc_transform; /* ICC transform loaded from the ICC file. */
- 	char icc_path[PATH_MAX];
-+
-+	// Zoom!
-+	struct wlr_swapchain *zoom_swapchain;
-+	float zoom_level;
-+	float zoom_target;
-+	int32_t zoom_animating;
-+	double zoom_x;
-+	double zoom_y;
- };
+diff --git a/src/common/server.c b/src/common/server.c
+index 838c428b..c7addae3 100644
+--- a/src/common/server.c
++++ b/src/common/server.c
+@@ -81,6 +81,12 @@ struct MangoServer server = {
+ 	.last_cursor_surface_destroy_listener =
+ 		{.notify = handle_last_cursor_surface_destroy},
  
- struct Pertag {
++	.zoom_swapchain = NULL,
++	.zoom_level = 1.0f,
++	.zoom_target = 1.0f,
++	.zoom_animating = 0,
++	
++
+ #ifdef XWAYLAND
+ 	.new_xwayland_surface_listener = {.notify = handle_new_xwayland_surface},
+ 	.xwayland_ready_listener = {.notify = handle_xwayland_ready},
 diff --git a/src/config/parse_config.c b/src/config/parse_config.c
 index 60050075..b8c36acd 100644
 --- a/src/config/parse_config.c
@@ -126,50 +143,50 @@ index 60050075..b8c36acd 100644
  		func = focus_window_or_workspace;
  		(*arg).i = parse_direction(arg_value);
 diff --git a/src/dispatch/bind.c b/src/dispatch/bind.c
-index 75445d4a..bef40ad8 100644
+index 02e5654f..be004a93 100644
 --- a/src/dispatch/bind.c
 +++ b/src/dispatch/bind.c
-@@ -2651,6 +2651,48 @@ int32_t dwindle_toggle_current_split(const Arg *arg) {
+@@ -2688,6 +2688,48 @@ int32_t dwindle_toggle_current_split(const Arg *arg) {
  	return 0;
  }
  
 +/* Screen zoom functions */
 +
 +static void screen_zoom_start_animation(void) {
-+	server.selected_monitor->zoom_animating = 1;
++	server.zoom_animating = 1;
 +}
 +
 +int32_t screen_zoom_in(const Arg *arg) {
-+	server.selected_monitor->zoom_target += config.zoom_speed;
-+	if (server.selected_monitor->zoom_target > config.zoom_max)
-+		server.selected_monitor->zoom_target = config.zoom_max;
++	server.zoom_target += config.zoom_speed;
++	if (server.zoom_target > config.zoom_max)
++		server.zoom_target = config.zoom_max;
 +	screen_zoom_start_animation();
 +	request_fresh_all_monitors();
 +	return 0;
 +}
 +
 +int32_t screen_zoom_out(const Arg *arg) {
-+	server.selected_monitor->zoom_target -= config.zoom_speed;
-+	if (server.selected_monitor->zoom_target < 1.0f)
-+		server.selected_monitor->zoom_target = 1.0f;
++	server.zoom_target -= config.zoom_speed;
++	if (server.zoom_target < 1.0f)
++		server.zoom_target = 1.0f;
 +	screen_zoom_start_animation();
 +	request_fresh_all_monitors();
 +	return 0;
 +}
 +
 +int32_t screen_zoom_reset(const Arg *arg) {
-+	server.selected_monitor->zoom_target = 1.0f;
++	server.zoom_target = 1.0f;
 +	screen_zoom_start_animation();
 +	request_fresh_all_monitors();
 +	return 0;
 +}
 +
 +int32_t screen_zoom_set(const Arg *arg) {
-+	server.selected_monitor->zoom_target = arg->f;
-+	if (server.selected_monitor->zoom_target < 1.0f)
-+		server.selected_monitor->zoom_target = 1.0f;
-+	if (server.selected_monitor->zoom_target > config.zoom_max)
-+		server.selected_monitor->zoom_target = config.zoom_max;
++	server.zoom_target = arg->f;
++	if (server.zoom_target < 1.0f)
++		server.zoom_target = 1.0f;
++	if (server.zoom_target > config.zoom_max)
++		server.zoom_target = config.zoom_max;
 +	screen_zoom_start_animation();
 +	request_fresh_all_monitors();
 +	return 0;
@@ -179,7 +196,7 @@ index 75445d4a..bef40ad8 100644
  	if (!server.selected_monitor || !arg->tc)
  		return 0;
 diff --git a/src/main.c b/src/main.c
-index 54bcc388..f128df48 100644
+index 5bd4bca3..9afcb923 100644
 --- a/src/main.c
 +++ b/src/main.c
 @@ -52,6 +52,10 @@
@@ -194,7 +211,7 @@ index 54bcc388..f128df48 100644
  #include <wlr/types/wlr_alpha_modifier_v1.h>
  #include <wlr/types/wlr_color_management_v1.h>
 diff --git a/src/manage/client.c b/src/manage/client.c
-index 72db0726..9a76c535 100644
+index 258ac2c3..b17e05a6 100644
 --- a/src/manage/client.c
 +++ b/src/manage/client.c
 @@ -37,6 +37,7 @@
@@ -205,31 +222,31 @@ index 72db0726..9a76c535 100644
  #include <wlr/types/wlr_seat.h>
  #include <wlr/types/wlr_subcompositor.h>
  #include <wlr/types/wlr_xcursor_manager.h>
-@@ -2604,6 +2605,164 @@ void client_set_opacity(Client *c, double opacity) {
+@@ -2604,6 +2605,154 @@ void client_set_opacity(Client *c, double opacity) {
  								   scene_buffer_apply_opacity, &opacity);
  }
  
-+void screen_zoom_update(Monitor *m) {
-+	if (!m->zoom_animating)
++void screen_zoom_update() {
++	if (!server.zoom_animating)
 +		return;
 +
-+	float diff = m->zoom_target - m->zoom_level;
++	float diff = server.zoom_target - server.zoom_level;
 +	if (fabsf(diff) < 0.001f) {
-+		m->zoom_level = m->zoom_target;
-+		m->zoom_animating = 0;
-+		if (m->zoom_level <= 1.0f) {
-+			m->zoom_level = 1.0f;
++		server.zoom_level = server.zoom_target;
++		server.zoom_animating = 0;
++		if (server.zoom_level <= 1.0f) {
++			server.zoom_level = 1.0f;
 +			/* Free zoom swapchain when not zoomed */
-+			if (m->zoom_swapchain) {
-+				wlr_swapchain_destroy(m->zoom_swapchain);
-+				m->zoom_swapchain = NULL;
++			if (server.zoom_swapchain) {
++				wlr_swapchain_destroy(server.zoom_swapchain);
++				server.zoom_swapchain = NULL;
 +			}
 +		}
 +		return;
 +	}
 +
 +	/* Smooth ease-out interpolation */
-+	m->zoom_level += diff * 0.15f;
++	server.zoom_level += diff * 0.15f;
 +}
 +
 +void render_zoomed(Monitor *m) {
@@ -248,10 +265,10 @@ index 72db0726..9a76c535 100644
 +	}
 +
 +	/* Ensure zoom swapchain exists and matches output size */
-+	if (!m->zoom_swapchain || m->zoom_swapchain->width != width ||
-+		m->zoom_swapchain->height != height) {
-+		if (m->zoom_swapchain)
-+			wlr_swapchain_destroy(m->zoom_swapchain);
++	if (!server.zoom_swapchain || server.zoom_swapchain->width != width ||
++		server.zoom_swapchain->height != height) {
++		if (server.zoom_swapchain)
++			wlr_swapchain_destroy(server.zoom_swapchain);
 +
 +		const struct wlr_drm_format_set *formats =
 +			wlr_renderer_get_texture_formats(server.renderer, server.renderer->render_buffer_caps);
@@ -264,8 +281,8 @@ index 72db0726..9a76c535 100644
 +			wlr_output_state_finish(&state);
 +			return;
 +		}
-+		m->zoom_swapchain = wlr_swapchain_create(server.allocator, width, height, fmt);
-+		if (!m->zoom_swapchain) {
++		server.zoom_swapchain = wlr_swapchain_create(server.allocator, width, height, fmt);
++		if (!server.zoom_swapchain) {
 +			wlr_log(WLR_ERROR, "[%s:%d] Failed to create zoom swapchain",
 +					__FILE__, __LINE__);
 +			wlr_output_commit_state(output, &state);
@@ -275,7 +292,7 @@ index 72db0726..9a76c535 100644
 +	}
 +
 +	/* Acquire zoom buffer */
-+	struct wlr_buffer *zoom_buf = wlr_swapchain_acquire(m->zoom_swapchain);
++	struct wlr_buffer *zoom_buf = wlr_swapchain_acquire(server.zoom_swapchain);
 +	if (!zoom_buf) {
 +		wlr_output_commit_state(output, &state);
 +		wlr_output_state_finish(&state);
@@ -308,21 +325,11 @@ index 72db0726..9a76c535 100644
 +	}
 +
 +	/* Calculate viewport centered on cursor */
-+	double cx = (server.cursor->x - m->m.x);
-+	double cy = (server.cursor->y - m->m.y);
-+	if (m == server.selected_monitor) {
-+	    m->zoom_x = cx;
-+	    m->zoom_y = cy;
-+	} else {
-+	    cx = m->zoom_x;
-+	    cy = m->zoom_y;
-+	}
++	double cx = (server.cursor->x - m->m.x) * output->scale;
++	double cy = (server.cursor->y - m->m.y) * output->scale;
 +
-+	cx *= output->scale;
-+	cy *= output->scale;
-+
-+	double vw = (double)width / m->zoom_level;
-+	double vh = (double)height / m->zoom_level;
++	double vw = (double)width / server.zoom_level;
++	double vh = (double)height / server.zoom_level;
 +
 +	double vx = cx - vw / 2.0;
 +	double vy = cy - vh / 2.0;
@@ -371,39 +378,26 @@ index 72db0726..9a76c535 100644
  	if (!c || !client_surface(c)) {
  		return;
 diff --git a/src/manage/monitor.c b/src/manage/monitor.c
-index 4695c420..728aeab1 100644
+index 80d6aa52..081ddbcd 100644
 --- a/src/manage/monitor.c
 +++ b/src/manage/monitor.c
-@@ -642,6 +642,12 @@ void handle_new_output(struct wl_listener *listener, void *data) {
- 	m->m.x = INT32_MAX;
- 	m->m.y = INT32_MAX;
- 
-+	m->zoom_level = 1.0f;
-+	m->zoom_target = 1.0f;
-+	m->zoom_animating = 0;
-+	m->zoom_x = 0;
-+	m->zoom_y = 0;
-+
- 	// Temporary pending state used to stage settings while matching rules.
- 	struct wlr_output_state pending;
- 	wlr_output_state_init(&pending);
-@@ -1345,6 +1351,10 @@ void handle_output_frame(struct wl_listener *listener, void *data) {
+@@ -1361,6 +1361,10 @@ void handle_output_frame(struct wl_listener *listener, void *data) {
  		monitor_stop_skip_frame_timer(m);
  	}
  
-+	screen_zoom_update(m);
++	screen_zoom_update();
 +
-+	if (m->zoom_level > 1.0f) render_zoomed(m);
++	if (server.zoom_level > 1.0f && server.selected_monitor == m) render_zoomed(m);
 +
  	mango_scene_output_commit(m->scene_output, &m->pending);
  
  skip:
-@@ -1353,7 +1363,7 @@ skip:
+@@ -1369,7 +1373,7 @@ skip:
  	wlr_scene_output_send_frame_done(m->scene_output, &now);
  
  	// If more frames are needed, ensure the next frame is scheduled.
 -	if (need_more_frames && server.allow_frame_scheduling) {
-+	if ( (need_more_frames || m->zoom_animating) && server.allow_frame_scheduling) {
++	if ( (need_more_frames || server.zoom_animating) && server.allow_frame_scheduling) {
  		request_fresh_all_monitors();
  	}
  }
