@@ -1,26 +1,27 @@
-From 8259538d0013d21c0b8ca1f9590562b7696f33da Mon Sep 17 00:00:00 2001
+From 78bd61b9b874a39c3729d88c8ed581aaec21f6ec Mon Sep 17 00:00:00 2001
 From: Silenceman <eestsoftware@gmail.com>
-Date: Tue, 22 Sep 2026 22:58:54 +0300
-Subject: [PATCH] Better multi monitor zoom implementation
+Date: Tue, 6 Oct 2026 13:37:37 +0300
+Subject: [PATCH] Update to new config format
 
 ---
- include/mango/common/server.h       |   7 ++
- include/mango/config/parse_config.h |   3 +
- include/mango/dispatch/bind.h       |   4 +
- include/mango/manage/client.h       |   2 +
- src/common/server.c                 |   6 ++
- src/config/parse_config.c           |  17 ++++
- src/dispatch/bind.c                 |  42 ++++++++
- src/main.c                          |   4 +
- src/manage/client.c                 | 149 ++++++++++++++++++++++++++++
- src/manage/monitor.c                |   6 +-
- 10 files changed, 239 insertions(+), 1 deletion(-)
+ include/mango/common/server.h |   7 ++
+ include/mango/config/parse.h  |   3 +
+ include/mango/dispatch/bind.h |   4 +
+ include/mango/manage/client.h |   2 +
+ src/common/server.c           |   6 ++
+ src/config/binding_parse.c    |   9 ++
+ src/config/option_defs.c      |   8 ++
+ src/dispatch/bind.c           |  42 ++++++++++
+ src/main.c                    |   4 +
+ src/manage/client.c           | 149 ++++++++++++++++++++++++++++++++++
+ src/manage/monitor.c          |   6 +-
+ 11 files changed, 239 insertions(+), 1 deletion(-)
 
 diff --git a/include/mango/common/server.h b/include/mango/common/server.h
-index 3949a4f0..d7bbb5fe 100644
+index 5007396e..9fa94e37 100644
 --- a/include/mango/common/server.h
 +++ b/include/mango/common/server.h
-@@ -234,6 +234,13 @@ struct MangoServer {
+@@ -236,6 +236,13 @@ struct MangoServer {
  	struct wl_listener new_foreign_toplevel_capture_listener;
  	struct wlr_ext_foreign_toplevel_list_v1 *foreign_toplevel_list;
  
@@ -34,11 +35,11 @@ index 3949a4f0..d7bbb5fe 100644
  #ifdef XWAYLAND
  	struct wlr_xwayland *xwayland;
  	struct wl_event_source *sync_keymap;
-diff --git a/include/mango/config/parse_config.h b/include/mango/config/parse_config.h
-index e28a6d09..b2bf0b5a 100644
---- a/include/mango/config/parse_config.h
-+++ b/include/mango/config/parse_config.h
-@@ -457,6 +457,9 @@ typedef struct {
+diff --git a/include/mango/config/parse.h b/include/mango/config/parse.h
+index 7bf9d161..ea958930 100644
+--- a/include/mango/config/parse.h
++++ b/include/mango/config/parse.h
+@@ -465,6 +465,9 @@ typedef struct {
  	int32_t shadows_position_x;
  	int32_t shadows_position_y;
  	float shadowscolor[4];
@@ -64,10 +65,10 @@ index e76405be..f4bffa26 100644
  int32_t dwindle_toggle_split_direction(const Arg *arg);
  int32_t dwindle_split_horizontal(const Arg *arg);
 diff --git a/include/mango/manage/client.h b/include/mango/manage/client.h
-index e289e945..aea0361f 100644
+index c1affb53..90280094 100644
 --- a/include/mango/manage/client.h
 +++ b/include/mango/manage/client.h
-@@ -387,6 +387,8 @@ void set_minimized(Client *c);
+@@ -410,6 +410,8 @@ void set_minimized(Client *c);
  void unminimize(Client *c);
  void exit_scroller_stack(Client *c);
  void clear_fullscreen_and_maximized_state(Monitor *m);
@@ -93,40 +94,11 @@ index 838c428b..c7addae3 100644
  #ifdef XWAYLAND
  	.new_xwayland_surface_listener = {.notify = handle_new_xwayland_surface},
  	.xwayland_ready_listener = {.notify = handle_xwayland_ready},
-diff --git a/src/config/parse_config.c b/src/config/parse_config.c
-index 60050075..b8c36acd 100644
---- a/src/config/parse_config.c
-+++ b/src/config/parse_config.c
-@@ -455,6 +455,10 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
- 		config->zoom_initial_ratio = atof(value);
- 	} else if (strcmp(key, "zoom_end_ratio") == 0) {
- 		config->zoom_end_ratio = atof(value);
-+	} else if (strcmp(key, "zoom_max") == 0) {
-+		config->zoom_max = atof(value);
-+	} else if (strcmp(key, "zoom_speed") == 0) {
-+		config->zoom_speed = atof(value);
- 	} else if (strcmp(key, "fadein_begin_opacity") == 0) {
- 		config->fadein_begin_opacity = atof(value);
- 	} else if (strcmp(key, "fadeout_begin_opacity") == 0) {
-@@ -3774,6 +3778,8 @@ void override_config(void) {
- 	config.zoom_initial_ratio =
- 		CLAMP_FLOAT(config.zoom_initial_ratio, 0.1f, 1.0f);
- 	config.zoom_end_ratio = CLAMP_FLOAT(config.zoom_end_ratio, 0.1f, 1.0f);
-+	config.zoom_max = CLAMP_FLOAT(config.zoom_max, 1.0f, 20.0f);
-+	config.zoom_speed = CLAMP_FLOAT(config.zoom_speed, 0.01f, 5.0f);
- 	config.fadein_begin_opacity =
- 		CLAMP_FLOAT(config.fadein_begin_opacity, 0.0f, 1.0f);
- 	config.fadeout_begin_opacity =
-@@ -4019,6 +4025,8 @@ void set_value_default() {
- 	config.tag_animation_direction = HORIZONTAL;
- 	config.zoom_initial_ratio = 0.4f;
- 	config.zoom_end_ratio = 0.8f;
-+	config.zoom_max = 6.0;
-+	config.zoom_speed = 0.3;
- 	config.fadein_begin_opacity = 0.5f;
- 	config.fadeout_begin_opacity = 0.5f;
- 	config.animation_duration_move = 500;
-@@ -4801,6 +4809,15 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
+diff --git a/src/config/binding_parse.c b/src/config/binding_parse.c
+index 862bf21c..f3ab35b6 100644
+--- a/src/config/binding_parse.c
++++ b/src/config/binding_parse.c
+@@ -520,6 +520,15 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
  	} else if (strcmp(func_name, "focusdir") == 0) {
  		func = focus_direction;
  		(*arg).i = parse_direction(arg_value);
@@ -142,11 +114,44 @@ index 60050075..b8c36acd 100644
  	} else if (strcmp(func_name, "focus_window_or_workspace") == 0) {
  		func = focus_window_or_workspace;
  		(*arg).i = parse_direction(arg_value);
+diff --git a/src/config/option_defs.c b/src/config/option_defs.c
+index 13acb475..c157440c 100644
+--- a/src/config/option_defs.c
++++ b/src/config/option_defs.c
+@@ -68,6 +68,10 @@ bool parse_option(Config *config, char *key, char *value, int line_number) {
+ 		config->zoom_initial_ratio = atof(value);
+ 	} else if (strcmp(key, "zoom_end_ratio") == 0) {
+ 		config->zoom_end_ratio = atof(value);
++	} else if (strcmp(key, "zoom_max") == 0) {
++		config->zoom_max = atof(value);
++	} else if (strcmp(key, "zoom_speed") == 0) {
++		config->zoom_speed = atof(value);
+ 	} else if (strcmp(key, "fade_in_begin_opacity") == 0) {
+ 		config->fadein_begin_opacity = atof(value);
+ 	} else if (strcmp(key, "fade_out_begin_opacity") == 0) {
+@@ -2236,6 +2240,8 @@ void set_value_default() {
+ 	config.tag_animation_direction = HORIZONTAL;
+ 	config.zoom_initial_ratio = 0.4f;
+ 	config.zoom_end_ratio = 0.8f;
++	config.zoom_max = 6.0;
++	config.zoom_speed = 0.3;
+ 	config.fadein_begin_opacity = 0.5f;
+ 	config.fadeout_begin_opacity = 0.5f;
+ 	config.animation_duration_move = 500;
+@@ -2568,6 +2574,8 @@ void override_config(void) {
+ 	config.zoom_initial_ratio =
+ 		CLAMP_FLOAT(config.zoom_initial_ratio, 0.1f, 1.0f);
+ 	config.zoom_end_ratio = CLAMP_FLOAT(config.zoom_end_ratio, 0.1f, 1.0f);
++	config.zoom_max = CLAMP_FLOAT(config.zoom_max, 1.0f, 20.0f);
++	config.zoom_speed = CLAMP_FLOAT(config.zoom_speed, 0.01f, 5.0f);
+ 	config.fadein_begin_opacity =
+ 		CLAMP_FLOAT(config.fadein_begin_opacity, 0.0f, 1.0f);
+ 	config.fadeout_begin_opacity =
 diff --git a/src/dispatch/bind.c b/src/dispatch/bind.c
-index 02e5654f..be004a93 100644
+index 199ba887..68cc1141 100644
 --- a/src/dispatch/bind.c
 +++ b/src/dispatch/bind.c
-@@ -2688,6 +2688,48 @@ int32_t dwindle_toggle_current_split(const Arg *arg) {
+@@ -2692,6 +2692,48 @@ int32_t dwindle_toggle_current_split(const Arg *arg) {
  	return 0;
  }
  
@@ -196,10 +201,10 @@ index 02e5654f..be004a93 100644
  	if (!server.selected_monitor || !arg->tc)
  		return 0;
 diff --git a/src/main.c b/src/main.c
-index 5bd4bca3..9afcb923 100644
+index f0ce1f5e..ab882d0b 100644
 --- a/src/main.c
 +++ b/src/main.c
-@@ -52,6 +52,10 @@
+@@ -55,6 +55,10 @@
  #include <wlr/backend/wayland.h>
  #include <wlr/interfaces/wlr_keyboard.h>
  #include <wlr/render/allocator.h>
@@ -211,10 +216,10 @@ index 5bd4bca3..9afcb923 100644
  #include <wlr/types/wlr_alpha_modifier_v1.h>
  #include <wlr/types/wlr_color_management_v1.h>
 diff --git a/src/manage/client.c b/src/manage/client.c
-index 258ac2c3..b17e05a6 100644
+index bdc84e5e..18c33c53 100644
 --- a/src/manage/client.c
 +++ b/src/manage/client.c
-@@ -37,6 +37,7 @@
+@@ -38,6 +38,7 @@
  #include <wlr/types/wlr_linux_drm_syncobj_v1.h>
  #include <wlr/types/wlr_pointer_constraints_v1.h>
  #include <wlr/types/wlr_presentation_time.h>
@@ -222,7 +227,7 @@ index 258ac2c3..b17e05a6 100644
  #include <wlr/types/wlr_seat.h>
  #include <wlr/types/wlr_subcompositor.h>
  #include <wlr/types/wlr_xcursor_manager.h>
-@@ -2604,6 +2605,154 @@ void client_set_opacity(Client *c, double opacity) {
+@@ -2783,6 +2784,154 @@ void client_set_opacity(Client *c, double opacity) {
  								   scene_buffer_apply_opacity, &opacity);
  }
  
@@ -378,10 +383,10 @@ index 258ac2c3..b17e05a6 100644
  	if (!c || !client_surface(c)) {
  		return;
 diff --git a/src/manage/monitor.c b/src/manage/monitor.c
-index 80d6aa52..081ddbcd 100644
+index cc59fc9e..d8ec00e2 100644
 --- a/src/manage/monitor.c
 +++ b/src/manage/monitor.c
-@@ -1361,6 +1361,10 @@ void handle_output_frame(struct wl_listener *listener, void *data) {
+@@ -1353,6 +1353,10 @@ void handle_output_frame(struct wl_listener *listener, void *data) {
  		monitor_stop_skip_frame_timer(m);
  	}
  
@@ -392,7 +397,7 @@ index 80d6aa52..081ddbcd 100644
  	mango_scene_output_commit(m->scene_output, &m->pending);
  
  skip:
-@@ -1369,7 +1373,7 @@ skip:
+@@ -1361,7 +1365,7 @@ skip:
  	wlr_scene_output_send_frame_done(m->scene_output, &now);
  
  	// If more frames are needed, ensure the next frame is scheduled.
